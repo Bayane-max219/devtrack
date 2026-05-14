@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DevTrack.API/DevTrack.API.csproj" />
+    <Project Path="src/DevTrack.Application/DevTrack.Application.csproj" />
+    <Project Path="src/DevTrack.Domain/DevTrack.Domain.csproj" />
+    <Project Path="src/DevTrack.Infrastructure/DevTrack.Infrastructure.csproj" />
+  </Folder>
+</Solution>
