@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using DevTrack.API.DTOs;
+using DevTrack.API.Services;
 using DevTrack.Domain.Entities;
 using DevTrack.Domain.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -10,10 +11,16 @@ namespace DevTrack.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class CommentsController(ICommentRepository commentRepo, ITicketRepository ticketRepo) : ControllerBase
+public class CommentsController(
+    ICommentRepository commentRepo,
+    ITicketRepository ticketRepo,
+    NotificationService notificationService) : ControllerBase
 {
     private Guid CurrentUserId =>
         Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    private string CurrentUserName =>
+        User.FindFirstValue(ClaimTypes.Name) ?? "Unknown";
 
     [HttpGet("ticket/{ticketId:guid}")]
     public async Task<IActionResult> GetByTicket(Guid ticketId)
@@ -44,6 +51,13 @@ public class CommentsController(ICommentRepository commentRepo, ITicketRepositor
 
         await commentRepo.AddAsync(comment);
         var created = await commentRepo.GetByIdAsync(comment.Id);
+
+        var preview = req.Content.Length > 80 ? req.Content[..80] + "..." : req.Content;
+        var assigneeId = ticket.AssigneeId ?? Guid.Empty;
+        await notificationService.NotifyCommentAdded(assigneeId, new TicketCommentAddedNotification(
+            ticket.Id, ticket.Title, ticket.ProjectId,
+            CurrentUserName, preview, DateTime.UtcNow));
+
         return CreatedAtAction(nameof(GetByTicket), new { ticketId = req.TicketId }, MapToDto(created!));
     }
 

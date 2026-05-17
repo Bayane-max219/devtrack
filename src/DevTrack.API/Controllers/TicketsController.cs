@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using DevTrack.API.DTOs;
+using DevTrack.API.Services;
 using DevTrack.Domain.Entities;
 using DevTrack.Domain.Enums;
 using DevTrack.Domain.Interfaces;
@@ -11,10 +12,16 @@ namespace DevTrack.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class TicketsController(ITicketRepository ticketRepo, IProjectRepository projectRepo) : ControllerBase
+public class TicketsController(
+    ITicketRepository ticketRepo,
+    IProjectRepository projectRepo,
+    NotificationService notificationService) : ControllerBase
 {
     private Guid CurrentUserId =>
         Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    private string CurrentUserName =>
+        User.FindFirstValue(ClaimTypes.Name) ?? "Unknown";
 
     [HttpGet("project/{projectId:guid}")]
     public async Task<IActionResult> GetProjectTickets(Guid projectId, [FromQuery] TicketStatus? status)
@@ -67,6 +74,14 @@ public class TicketsController(ITicketRepository ticketRepo, IProjectRepository 
 
         await ticketRepo.AddAsync(ticket);
         var created = await ticketRepo.GetByIdAsync(ticket.Id);
+
+        if (req.AssigneeId.HasValue && req.AssigneeId.Value != CurrentUserId)
+        {
+            await notificationService.NotifyTicketAssigned(req.AssigneeId.Value, new TicketAssignedNotification(
+                ticket.Id, ticket.Title, req.ProjectId, project.Name,
+                CurrentUserName, DateTime.UtcNow));
+        }
+
         return CreatedAtAction(nameof(GetTicket), new { id = ticket.Id }, MapToDto(created!));
     }
 
@@ -76,6 +91,8 @@ public class TicketsController(ITicketRepository ticketRepo, IProjectRepository 
         var ticket = await ticketRepo.GetByIdAsync(id);
         if (ticket is null) return NotFound();
 
+        var previousAssigneeId = ticket.AssigneeId;
+
         ticket.Title = req.Title;
         ticket.Description = req.Description;
         ticket.Priority = req.Priority;
@@ -83,6 +100,15 @@ public class TicketsController(ITicketRepository ticketRepo, IProjectRepository 
         ticket.DueDate = req.DueDate;
 
         await ticketRepo.UpdateAsync(ticket);
+
+        if (req.AssigneeId.HasValue && req.AssigneeId != previousAssigneeId && req.AssigneeId.Value != CurrentUserId)
+        {
+            var project = await projectRepo.GetByIdAsync(ticket.ProjectId);
+            await notificationService.NotifyTicketAssigned(req.AssigneeId.Value, new TicketAssignedNotification(
+                ticket.Id, ticket.Title, ticket.ProjectId, project?.Name ?? "",
+                CurrentUserName, DateTime.UtcNow));
+        }
+
         return Ok(MapToDto(ticket));
     }
 
@@ -92,8 +118,14 @@ public class TicketsController(ITicketRepository ticketRepo, IProjectRepository 
         var ticket = await ticketRepo.GetByIdAsync(id);
         if (ticket is null) return NotFound();
 
+        var oldStatus = ticket.Status.ToString();
         ticket.Status = req.Status;
         await ticketRepo.UpdateAsync(ticket);
+
+        await notificationService.NotifyTicketStatusChanged(ticket.ProjectId, new TicketStatusChangedNotification(
+            ticket.Id, ticket.Title, ticket.ProjectId,
+            oldStatus, req.Status.ToString(),
+            CurrentUserName, DateTime.UtcNow));
 
         return Ok(new { id = ticket.Id, status = ticket.Status.ToString() });
     }
